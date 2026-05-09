@@ -1,29 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { 
-    getFirestore, doc, setDoc, getDoc 
-  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-  const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_DOMAIN",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_BUCKET",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
-  };
-
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-
-  window.db = db;
-  window.doc = doc;
-  window.setDoc = setDoc;
-  window.getDoc = getDoc;
-</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>FinTrack Pro</title>
@@ -451,75 +428,35 @@ button{cursor:pointer;font-family:inherit;border:none;}
 
 <div id="toast"></div>
 
-  
 <script>
-  const AVATARS = ["👤","💼","🏠","🚀","💡","🎯","🌐","⚡"];
+const AVATARS = ["👤","💼","🏠","🚀","💡","🎯","🌐","⚡"];
 const P_CATS = ["Food","Travel","Shopping","Bills","Education","Health","Entertainment","Other"];
 const B_CATS = ["Salary","Operations","Marketing","Office Expenses","Software","Legal","Logistics","Other"];
+const COLORS = ["#7c3aed","#2563eb","#059669","#d97706","#dc2626","#0891b2","#65a30d","#db2777"];
 
 let state = {
-  authMode:"login",
-  users:[],
-  currentUser:null,
-  profiles:[],
-  activeProfile:null,
-  transactions:[],
-  txType:"expense",
-  profileType:"personal",
-  selectedAvatar:"👤",
-  editTxId:null
+  authMode:"login", users:[], currentUser:null,
+  profiles:[], activeProfile:null, transactions:[],
+  txType:"expense", profileType:"personal", selectedAvatar:"👤",
+  editTxId:null,
+  charts:{pie:null,bar:null,compare:null}
 };
 
-window.onload = async () => {
-  state.users = await safeGet("ft_users", []);
+// INIT
+window.onload = () => {
+  state.users = safeGet("ft_users",[]);
   buildAvatarOpts();
   setToday();
 };
 
-async function safeGet(key, def = []) {
-  try {
-    const ref = doc(db, "fintrack", key);
-    const snap = await getDoc(ref);
-
-    if (snap.exists()) {
-      return snap.data().value;
-    }
-
-    return def;
-
-  } catch (e) {
-    console.error(e);
-    return def;
-  }
-}
-
-async function safeSet(key, value) {
-  try {
-    const ref = doc(db, "fintrack", key);
-
-    await setDoc(ref, {
-      value: value
-    });
-
-  } catch (e) {
-    console.error(e);
-  }
-}
-
-function hashPass(p){
-  return btoa(p + "_ft_salt");
-}
+function safeGet(k,def){try{return JSON.parse(localStorage.getItem(k))||def;}catch{return def;}}
+function safeSet(k,v){localStorage.setItem(k,JSON.stringify(v));}
+function hashPass(p){return btoa(p+"_ft_salt");}
 
 function showToast(msg,type="success"){
   const t=document.getElementById("toast");
-  t.textContent=msg;
-  t.className="show "+type;
-  t.style.display="block";
-
-  setTimeout(()=>{
-    t.style.display="none";
-    t.className="";
-  },3000);
+  t.textContent=msg; t.className="show "+type; t.style.display="block";
+  setTimeout(()=>{t.style.display="none";t.className="";},3000);
 }
 
 function setToday(){
@@ -527,457 +464,499 @@ function setToday(){
   document.getElementById("tx-date").value=d;
 }
 
+// AUTH
 function switchAuth(mode){
   state.authMode=mode;
-
-  document.querySelectorAll(".auth-tab")
-    .forEach((t,i)=>t.classList.toggle(
-      "active",
-      i === (mode==="login"?0:1)
-    ));
-
-  document.getElementById("name-group").style.display =
-    mode==="signup" ? "block" : "none";
-
-  document.querySelector(".btn-primary").textContent =
-    mode==="login"
-      ? "Sign In →"
-      : "Create Account →";
+  document.querySelectorAll(".auth-tab").forEach((t,i)=>t.classList.toggle("active",i===(mode==="login"?0:1)));
+  document.getElementById("name-group").style.display=mode==="signup"?"block":"none";
+  document.querySelector(".btn-primary").textContent=mode==="login"?"Sign In →":"Create Account →";
+  document.getElementById("demo-hint").style.display=mode==="login"?"block":"none";
+  document.getElementById("auth-err").style.display="none";
 }
 
-async function doAuth(){
-
+function doAuth(){
   const email=document.getElementById("inp-email").value.trim();
   const pass=document.getElementById("inp-pass").value;
   const name=document.getElementById("inp-name").value.trim();
-
   const errEl=document.getElementById("auth-err");
-
   errEl.style.display="none";
 
   if(state.authMode==="login"){
-
-    const users = await safeGet("ft_users", []);
-    state.users = users;
-
-    const user = users.find(
-      u => u.email===email &&
-      u.password===hashPass(pass)
-    );
-
-    if(user){
-      await loginUser(user);
-    } else {
-      errEl.textContent="Invalid email or password";
-      errEl.style.display="block";
+    if(email==="demo@fintrack.pro"&&pass==="demo123"){
+      loginUser({id:"demo",email,name:"Demo User"},true); return;
     }
-
+    const u=state.users.find(u=>u.email===email&&u.password===hashPass(pass));
+    if(u){loginUser(u);}else{errEl.textContent="Invalid email or password.";errEl.style.display="block";}
   } else {
-
-    if(!name || !email || !pass){
-      errEl.textContent="All fields required";
-      errEl.style.display="block";
-      return;
-    }
-
-    const exists = state.users.find(
-      u => u.email===email
-    );
-
-    if(exists){
-      errEl.textContent="Email already exists";
-      errEl.style.display="block";
-      return;
-    }
-
-    const newUser = {
-      id: Date.now().toString(),
-      email,
-      password: hashPass(pass),
-      name
-    };
-
-    state.users.push(newUser);
-
-    await safeSet("ft_users", state.users);
-
-    await loginUser(newUser);
+    if(!name||!email||!pass){errEl.textContent="All fields required.";errEl.style.display="block";return;}
+    if(state.users.find(u=>u.email===email)){errEl.textContent="Email already registered.";errEl.style.display="block";return;}
+    const nu={id:Date.now().toString(),email,password:hashPass(pass),name};
+    state.users.push(nu); safeSet("ft_users",state.users);
+    loginUser(nu);
   }
 }
 
-async function loginUser(user){
-
-  state.currentUser = user;
-
+function loginUser(user, isDemo=false){
+  state.currentUser=user;
   document.getElementById("sb-name").textContent=user.name;
-
-  document.getElementById("sb-avatar").textContent =
-    user.name[0].toUpperCase();
-
+  document.getElementById("sb-avatar").textContent=user.name[0].toUpperCase();
   document.getElementById("auth-screen").style.display="none";
+  document.getElementById("app-screen").classList.add("show");
 
-  document.getElementById("app-screen")
-    .classList.add("show");
-
-  state.profiles = await safeGet(
-    `ft_profiles_${user.id}`,
-    []
-  );
-
+  state.profiles=safeGet(`ft_profiles_${user.id}`,[]);
+  if(isDemo&&!state.profiles.length){
+    state.profiles=[
+      {id:"dp1",userId:"demo",name:"Personal Life",type:"personal",budget:30000,avatar:"🏠"},
+      {id:"dp2",userId:"demo",name:"My Business",type:"business",budget:80000,avatar:"💼"}
+    ];
+    safeSet("ft_profiles_demo",state.profiles);
+    const s1=[
+      {id:"t1",profileId:"dp1",amount:2500,type:"expense",category:"Food",date:"2025-05-01",notes:"Groceries"},
+      {id:"t2",profileId:"dp1",amount:1200,type:"expense",category:"Travel",date:"2025-05-03",notes:"Cab rides"},
+      {id:"t3",profileId:"dp1",amount:50000,type:"income",category:"Other",date:"2025-05-01",notes:"Salary"},
+      {id:"t4",profileId:"dp1",amount:4000,type:"expense",category:"Bills",date:"2025-05-05",notes:"Electricity"},
+      {id:"t5",profileId:"dp1",amount:3500,type:"expense",category:"Shopping",date:"2025-05-08",notes:"Clothes"},
+    ];
+    const s2=[
+      {id:"t6",profileId:"dp2",amount:120000,type:"income",category:"Salary",date:"2025-05-01",notes:"Revenue"},
+      {id:"t7",profileId:"dp2",amount:25000,type:"expense",category:"Marketing",date:"2025-05-02",notes:"Ads"},
+      {id:"t8",profileId:"dp2",amount:15000,type:"expense",category:"Operations",date:"2025-05-04",notes:"Servers"},
+      {id:"t9",profileId:"dp2",amount:8000,type:"expense",category:"Office Expenses",date:"2025-05-06",notes:"Supplies"},
+    ];
+    safeSet("ft_tx_dp1",s1); safeSet("ft_tx_dp2",s2);
+  }
   buildProfileSelect();
-
   if(state.profiles.length){
-    await setActiveProfile(state.profiles[0].id);
+    setActiveProfile(state.profiles[0].id);
   } else {
+    state.transactions=[];
     renderDashboard();
   }
-
   navTo("dashboard");
 }
 
 function doLogout(){
-
-  state.currentUser = null;
-  state.profiles = [];
-  state.transactions = [];
-  state.activeProfile = null;
-
-  document.getElementById("app-screen")
-    .classList.remove("show");
-
-  document.getElementById("auth-screen")
-    .style.display="flex";
+  state={...state,currentUser:null,profiles:[],activeProfile:null,transactions:[],charts:{pie:null,bar:null,compare:null}};
+  document.getElementById("app-screen").classList.remove("show");
+  document.getElementById("auth-screen").style.display="flex";
+  document.getElementById("inp-email").value="";
+  document.getElementById("inp-pass").value="";
+  document.getElementById("inp-name").value="";
+  closeSidebar();
 }
 
+// SIDEBAR
+function toggleSidebar(){
+  document.getElementById("sidebar").classList.toggle("open");
+  document.getElementById("sidebar-overlay").classList.toggle("show");
+}
+function closeSidebar(){
+  document.getElementById("sidebar").classList.remove("open");
+  document.getElementById("sidebar-overlay").classList.remove("show");
+}
+
+// NAV
 function navTo(page){
-
-  document.querySelectorAll(".page")
-    .forEach(p=>{
-      p.classList.remove("active");
-    });
-
-  document.getElementById(`page-${page}`)
-    .classList.add("active");
-
-  document.querySelectorAll(".nav-item")
-    .forEach(n=>n.classList.remove("active"));
-
-  document.querySelector(`[data-page="${page}"]`)
-    ?.classList.add("active");
-
-  if(page==="profiles"){
-    renderProfiles();
-  }
-
-  if(page==="transactions"){
-    renderTransactions();
-  }
+  document.querySelectorAll(".nav-item").forEach(n=>n.classList.toggle("active",n.dataset.page===page));
+  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id===`page-${page}`));
+  const titles={dashboard:"Dashboard",profiles:"Profiles",transactions:"Transactions",analytics:"Analytics",insights:"AI Insights"};
+  document.getElementById("page-title").textContent=titles[page]||page;
+  document.getElementById("add-tx-btn").style.display=(page==="transactions"&&state.activeProfile)?"flex":"none";
+  if(page==="analytics")setTimeout(renderCharts,100);
+  if(page==="insights")renderInsights();
+  if(page==="profiles")renderProfiles();
+  if(page==="transactions")renderTransactions();
+  closeSidebar();
 }
 
+// PROFILES
 function buildProfileSelect(){
-
   const sel=document.getElementById("profile-select");
-
   sel.innerHTML="";
-
-  if(!state.profiles.length){
-
-    sel.innerHTML =
-      `<option>No profiles</option>`;
-
-    return;
-  }
-
+  if(!state.profiles.length){sel.innerHTML='<option value="">No profiles</option>';return;}
   state.profiles.forEach(p=>{
-
     const opt=document.createElement("option");
-
-    opt.value=p.id;
-
-    opt.textContent=`${p.avatar} ${p.name}`;
-
+    opt.value=p.id; opt.textContent=`${p.avatar} ${p.name}`;
     sel.appendChild(opt);
   });
 }
 
-async function switchProfile(id){
-
-  await setActiveProfile(id);
-
-  renderDashboard();
+function switchProfile(id){
+  setActiveProfile(id);
+  const cur=document.querySelector(".nav-item.active")?.dataset?.page||"dashboard";
+  navTo(cur);
 }
 
-async function setActiveProfile(id){
-
-  state.activeProfile =
-    state.profiles.find(p=>p.id===id);
-
-  if(!state.activeProfile) return;
-
-  state.transactions = await safeGet(
-    `ft_tx_${id}`,
-    []
-  );
-
-  document.getElementById("profile-select")
-    .value=id;
-
-  renderDashboard();
-}
-
-async function renderProfiles(){
-
-  const grid=document.getElementById("profiles-grid");
-
-  grid.innerHTML="";
-
-  for(const p of state.profiles){
-
-    const txs = await safeGet(
-      `ft_tx_${p.id}`,
-      []
-    );
-
-    const income = txs
-      .filter(t=>t.type==="income")
-      .reduce((s,t)=>s+t.amount,0);
-
-    const expense = txs
-      .filter(t=>t.type==="expense")
-      .reduce((s,t)=>s+t.amount,0);
-
-    const div=document.createElement("div");
-
-    div.className="profile-card";
-
-    div.innerHTML=`
-      <div class="profile-avatar">${p.avatar}</div>
-
-      <div class="profile-name">${p.name}</div>
-
-      <div class="profile-type">${p.type}</div>
-
-      <div style="color:#34d399">
-        +₹${income.toLocaleString()}
-      </div>
-
-      <div style="color:#f87171">
-        -₹${expense.toLocaleString()}
-      </div>
-    `;
-
-    div.onclick=async ()=>{
-      await switchProfile(p.id);
-      navTo("dashboard");
-    };
-
-    grid.appendChild(div);
+function setActiveProfile(id){
+  state.activeProfile=state.profiles.find(p=>p.id===id)||state.profiles[0]||null;
+  if(state.activeProfile){
+    state.transactions=safeGet(`ft_tx_${state.activeProfile.id}`,[]);
+    document.getElementById("profile-select").value=state.activeProfile.id;
+    document.getElementById("page-sub").textContent=`${state.activeProfile.avatar} ${state.activeProfile.name} · ${state.activeProfile.type}`;
   }
+  renderDashboard();
 }
 
+function renderProfiles(){
+  const grid=document.getElementById("profiles-grid");
+  grid.innerHTML="";
+  state.profiles.forEach(p=>{
+    const txs=safeGet(`ft_tx_${p.id}`,[]);
+    const pi=txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+    const pe=txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+    const active=state.activeProfile?.id===p.id;
+    const div=document.createElement("div");
+    div.className=`profile-card${active?" active":""}`;
+    div.innerHTML=`<div class="profile-avatar">${p.avatar}</div>
+      <div class="profile-name">${p.name}</div>
+      <div class="profile-type">${p.type}</div>
+      <div class="profile-stats">
+        <div style="color:#34d399;margin-bottom:2px;">+₹${pi.toLocaleString()}</div>
+        <div style="color:#f87171;margin-bottom:2px;">-₹${pe.toLocaleString()}</div>
+        ${p.budget?`<div style="color:var(--dim);font-size:11px;">Budget ₹${p.budget.toLocaleString()}</div>`:""}
+      </div>`;
+    div.onclick=()=>{ setActiveProfile(p.id); buildProfileSelect(); navTo("dashboard"); };
+    grid.appendChild(div);
+  });
+  const add=document.createElement("div");
+  add.className="profile-card profile-add";
+  add.innerHTML=`<div class="profile-add-icon">+</div><div class="profile-add-label">New Profile</div>`;
+  add.onclick=openProfileModal;
+  grid.appendChild(add);
+}
+
+// DASHBOARD
 function renderDashboard(){
+  const hasPro=!!state.activeProfile;
+  document.getElementById("dash-empty").style.display=hasPro?"none":"block";
+  document.getElementById("dash-content").style.display=hasPro?"block":"none";
+  if(!hasPro)return;
 
-  if(!state.activeProfile) return;
+  const txs=state.transactions;
+  const income=txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const expense=txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const budget=state.activeProfile.budget||0;
+  const balance=budget>0?budget+income-expense:income-expense;
+  const budPct=budget?Math.min((expense/budget)*100,100):0;
+  const remaining=budget?budget-expense:income-expense;
 
-  const txs = state.transactions;
+  document.getElementById("d-balance").textContent=(balance<0?"-":"")+"₹"+Math.abs(balance).toLocaleString();
+  document.getElementById("d-balance").style.color=balance>=0?"#a78bfa":"#f87171";
+  document.getElementById("d-breakdown").textContent=budget>0?
+    `Budget ₹${budget.toLocaleString()} + Income ₹${income.toLocaleString()} − Expense ₹${expense.toLocaleString()}`:
+    `Income ₹${income.toLocaleString()} − Expense ₹${expense.toLocaleString()}`;
+  document.getElementById("d-income").textContent="₹"+income.toLocaleString();
+  document.getElementById("d-expense").textContent="₹"+expense.toLocaleString();
+  document.getElementById("d-budpct").textContent=budget?budPct.toFixed(0)+"%":"—";
+  document.getElementById("d-budpct").style.color=budPct>80?"#f59e0b":"#a78bfa";
+  document.getElementById("d-budsub").textContent=budget?`of ₹${budget.toLocaleString()}`:"No budget set";
+  document.getElementById("d-remaining").textContent="₹"+Math.abs(remaining).toLocaleString();
+  document.getElementById("d-remaining").style.color=remaining>=0?"#34d399":"#f87171";
 
-  const income = txs
-    .filter(t=>t.type==="income")
-    .reduce((s,t)=>s+t.amount,0);
+  const bbs=document.getElementById("budget-bar-section");
+  if(budget>0){
+    bbs.style.display="block";
+    document.getElementById("bbar-pct").textContent=budPct.toFixed(0)+"%";
+    document.getElementById("bbar-pct").style.color=budPct>100?"#f87171":budPct>80?"#f59e0b":"#34d399";
+    const fill=document.getElementById("bbar-fill");
+    fill.style.width=budPct+"%";
+    fill.style.background=budPct>100?"#dc2626":budPct>80?"linear-gradient(90deg,#f59e0b,#ef4444)":"linear-gradient(90deg,#7c3aed,#2563eb)";
+    document.getElementById("bbar-spent").textContent="Spent ₹"+expense.toLocaleString();
+    document.getElementById("bbar-total").textContent="Budget ₹"+budget.toLocaleString();
+    const warn=document.getElementById("bbar-warn");
+    if(budPct>=80){
+      warn.style.display="block";
+      warn.style.color=budPct>100?"#f87171":"#f59e0b";
+      warn.textContent=budPct>100?"⚠ Budget exceeded!":"⚠ "+budPct.toFixed(0)+"% of budget used";
+    } else warn.style.display="none";
+  } else bbs.style.display="none";
 
-  const expense = txs
-    .filter(t=>t.type==="expense")
-    .reduce((s,t)=>s+t.amount,0);
+  // Recent transactions
+  const recentEl=document.getElementById("d-recent-tx");
+  if(!txs.length){recentEl.innerHTML='<div style="text-align:center;color:var(--dim);padding:20px;font-size:13px;">No transactions yet</div>';}
+  else{recentEl.innerHTML=txs.slice(0,5).map(t=>`
+    <div class="tx-row">
+      <div class="tx-left">
+        <div class="tx-icon" style="background:${t.type==="income"?"rgba(5,150,105,0.15)":"rgba(220,38,38,0.1)"};">${t.type==="income"?"↑":"↓"}</div>
+        <div><div class="tx-cat">${t.category}</div><div class="tx-meta">${t.date}${t.notes?" · "+t.notes:""}</div></div>
+      </div>
+      <span class="tx-amount" style="color:${t.type==="income"?"#34d399":"#f87171"};">${t.type==="income"?"+":"-"}₹${t.amount.toLocaleString()}</span>
+    </div>`).join("");}
 
-  const balance = income - expense;
-
-  document.getElementById("d-income")
-    .textContent=`₹${income.toLocaleString()}`;
-
-  document.getElementById("d-expense")
-    .textContent=`₹${expense.toLocaleString()}`;
-
-  document.getElementById("d-balance")
-    .textContent=`₹${balance.toLocaleString()}`;
+  // Global
+  const allProf=safeGet(`ft_profiles_${state.currentUser.id}`,[]);
+  const getTotals=(profs)=>profs.reduce((acc,p)=>{
+    const txs=safeGet(`ft_tx_${p.id}`,[]);
+    return {income:acc.income+txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0),
+            expense:acc.expense+txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0)};
+  },{income:0,expense:0});
+  const pers=getTotals(allProf.filter(p=>p.type==="personal"));
+  const biz=getTotals(allProf.filter(p=>p.type==="business"));
+  document.getElementById("d-global").innerHTML=[
+    {l:"Personal Income",v:`₹${pers.income.toLocaleString()}`,c:"#34d399"},
+    {l:"Personal Expense",v:`₹${pers.expense.toLocaleString()}`,c:"#f87171"},
+    {l:"Business Income",v:`₹${biz.income.toLocaleString()}`,c:"#34d399"},
+    {l:"Business Expense",v:`₹${biz.expense.toLocaleString()}`,c:"#f87171"},
+  ].map(r=>`<div class="global-row"><span>${r.l}</span><span style="font-weight:600;color:${r.c};">${r.v}</span></div>`).join("");
 }
 
-function openProfileModal(){
-  document.getElementById("profile-modal")
-    .classList.add("show");
+// TRANSACTIONS
+function renderTransactions(){
+  if(!state.activeProfile){return;}
+  const txs=state.transactions;
+  const income=txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const expense=txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const budget=state.activeProfile?.budget||0;
+  const balance=budget>0?budget+income-expense:income-expense;
+  document.getElementById("tx-income").textContent="₹"+income.toLocaleString();
+  document.getElementById("tx-expense").textContent="₹"+expense.toLocaleString();
+  document.getElementById("tx-balance").textContent="₹"+Math.abs(balance).toLocaleString();
+  document.getElementById("tx-balance").style.color=balance>=0?"#a78bfa":"#f87171";
+
+  const list=document.getElementById("tx-list");
+  if(!txs.length){list.innerHTML='<div style="text-align:center;color:var(--dim);padding:40px;font-size:13px;">No transactions yet. Click "+ Add" to begin.</div>';return;}
+  list.innerHTML=txs.map(t=>`
+    <div class="tx-row">
+      <div class="tx-left">
+        <div class="tx-icon" style="background:${t.type==="income"?"rgba(5,150,105,0.15)":"rgba(220,38,38,0.1)"};">${t.type==="income"?"↑":"↓"}</div>
+        <div><div class="tx-cat">${t.category}</div><div class="tx-meta">${t.date}${t.notes?" · "+t.notes:""}</div></div>
+      </div>
+      <div class="tx-right">
+        <span class="tx-amount" style="color:${t.type==="income"?"#34d399":"#f87171"};">${t.type==="income"?"+":"-"}₹${t.amount.toLocaleString()}</span>
+        <span class="badge ${t.type==="income"?"badge-in":"badge-ex"}">${t.type}</span>
+        <button class="btn-sm btn-edit" onclick="editTx('${t.id}')">✎</button>
+        <button class="btn-sm btn-del" onclick="deleteTx('${t.id}')">✕</button>
+      </div>
+    </div>`).join("");
 }
 
-function closeProfileModal(){
-  document.getElementById("profile-modal")
-    .classList.remove("show");
-}
+// CHARTS
+function destroyChart(key){if(state.charts[key]){state.charts[key].destroy();state.charts[key]=null;}}
 
-function buildAvatarOpts(){
-
-  const el=document.getElementById("avatar-opts");
-
-  el.innerHTML=AVATARS.map(a=>`
-    <button
-      class="avatar-opt"
-      onclick="selectAvatar('${a}')">
-      ${a}
-    </button>
-  `).join("");
-}
-
-function selectAvatar(a){
-  state.selectedAvatar=a;
-}
-
-function setProfileType(type){
-  state.profileType=type;
-}
-
-async function saveProfile(){
-
-  const name=document.getElementById("p-name")
-    .value.trim();
-
-  if(!name){
-    showToast("Enter profile name","danger");
+function renderCharts(){
+  if(!state.activeProfile||!state.transactions.length){
+    document.getElementById("analytics-empty").style.display="block";
+    document.getElementById("analytics-content").style.display="none";
     return;
   }
+  document.getElementById("analytics-empty").style.display="none";
+  document.getElementById("analytics-content").style.display="block";
 
-  const profile = {
-    id: Date.now().toString(),
-    userId: state.currentUser.id,
-    name,
-    type: state.profileType,
-    budget: parseFloat(
-      document.getElementById("p-budget").value
-    ) || 0,
-    avatar: state.selectedAvatar
+  const txs=state.transactions;
+  const byCat={};
+  txs.filter(t=>t.type==="expense").forEach(t=>{byCat[t.category]=(byCat[t.category]||0)+t.amount;});
+  const catLabels=Object.keys(byCat), catVals=Object.values(byCat);
+
+  destroyChart("pie");
+  state.charts.pie=new Chart(document.getElementById("pie-chart"),{
+    type:"doughnut",
+    data:{labels:catLabels,datasets:[{data:catVals,backgroundColor:COLORS,borderWidth:0}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`₹${ctx.raw.toLocaleString()}`}}}}
+  });
+  document.getElementById("pie-legend").innerHTML=catLabels.map((l,i)=>`<div class="legend-item"><div class="legend-dot" style="background:${COLORS[i%COLORS.length]}"></div>${l}</div>`).join("");
+
+  const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const mData=months.map((m,i)=>{
+    const mo=txs.filter(t=>new Date(t.date).getMonth()===i);
+    return{m,inc:mo.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0),exp:mo.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0)};
+  }).filter(d=>d.inc>0||d.exp>0);
+
+  destroyChart("bar");
+  state.charts.bar=new Chart(document.getElementById("bar-chart"),{
+    type:"bar",
+    data:{labels:mData.map(d=>d.m),datasets:[
+      {label:"Income",data:mData.map(d=>d.inc),backgroundColor:"#059669",borderRadius:4},
+      {label:"Expense",data:mData.map(d=>d.exp),backgroundColor:"#7c3aed",borderRadius:4}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"#94a3b8",boxWidth:10}}},scales:{x:{ticks:{color:"#64748b"},grid:{display:false}},y:{ticks:{color:"#64748b",callback:v=>"₹"+(v/1000).toFixed(0)+"k"},grid:{color:"rgba(255,255,255,0.04)"}}}}
+  });
+
+  const allPro=safeGet(`ft_profiles_${state.currentUser.id}`,[]);
+  const gTot=(profs)=>profs.reduce((acc,p)=>{const t=safeGet(`ft_tx_${p.id}`,[]);return{i:acc.i+t.filter(x=>x.type==="income").reduce((s,x)=>s+x.amount,0),e:acc.e+t.filter(x=>x.type==="expense").reduce((s,x)=>s+x.amount,0)};},{i:0,e:0});
+  const pers=gTot(allPro.filter(p=>p.type==="personal"));
+  const biz=gTot(allPro.filter(p=>p.type==="business"));
+
+  destroyChart("compare");
+  state.charts.compare=new Chart(document.getElementById("compare-chart"),{
+    type:"bar",
+    data:{labels:["Income","Expense"],datasets:[
+      {label:"Personal",data:[pers.i,pers.e],backgroundColor:"#2563eb",borderRadius:4},
+      {label:"Business",data:[biz.i,biz.e],backgroundColor:"#7c3aed",borderRadius:4}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"#94a3b8",boxWidth:10}}},scales:{x:{ticks:{color:"#64748b"},grid:{display:false}},y:{ticks:{color:"#64748b",callback:v=>"₹"+(v/1000).toFixed(0)+"k"},grid:{color:"rgba(255,255,255,0.04)"}}}}
+  });
+}
+
+// INSIGHTS
+function renderInsights(){
+  const list=document.getElementById("insights-list");
+  if(!state.aiInsights||!state.aiInsights.length){
+    list.innerHTML=`<div class="empty-state"><div class="empty-icon">✦</div><div class="empty-title">No insights yet</div><p style="font-size:14px;">Add transactions and click "Generate Insights"</p></div>`;
+  } else {
+    list.innerHTML=state.aiInsights.map(ins=>`
+      <div class="insight-card">
+        <div class="insight-icon" style="background:${ins.color}20;">${ins.icon}</div>
+        <div class="insight-text">${ins.text}</div>
+      </div>`).join("");
+  }
+  const p=state.activeProfile;
+  const bva=document.getElementById("budget-vs-actual");
+  if(p&&p.budget>0){
+    const exp=state.transactions.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+    bva.style.display="block";
+    document.getElementById("bva-content").innerHTML=[
+      {l:"Budget",v:p.budget,c:"#7c3aed"},
+      {l:"Actual Expense",v:exp,c:exp>p.budget?"#dc2626":"#34d399"}
+    ].map(b=>`<div>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:6px;">${b.l}</div>
+      <div style="font-size:22px;font-weight:700;color:${b.c};">₹${b.v.toLocaleString()}</div>
+      <div style="height:5px;background:rgba(255,255,255,0.06);border-radius:99px;margin-top:10px;">
+        <div style="height:100%;border-radius:99px;background:${b.c};width:${Math.min((b.v/Math.max(p.budget,exp))*100,100)}%;"></div>
+      </div></div>`).join("");
+  } else bva.style.display="none";
+}
+
+async function fetchAiInsights(){
+  if(!state.activeProfile||!state.transactions.length){showToast("Add transactions first","danger");return;}
+  const btn=document.getElementById("gen-insights-btn");
+  btn.textContent="Analyzing..."; btn.disabled=true;
+  const txs=state.transactions;
+  const summary={
+    profile:state.activeProfile.name, type:state.activeProfile.type, budget:state.activeProfile.budget,
+    totalExpense:txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0),
+    totalIncome:txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0),
+    byCategory:Object.entries(txs.filter(t=>t.type==="expense").reduce((acc,t)=>({...acc,[t.category]:(acc[t.category]||0)+t.amount}),{})).map(([k,v])=>({category:k,amount:v}))
   };
-
-  state.profiles.push(profile);
-
-  await safeSet(
-    `ft_profiles_${state.currentUser.id}`,
-    state.profiles
-  );
-
-  buildProfileSelect();
-
-  renderProfiles();
-
-  closeProfileModal();
-
-  showToast("Profile Created");
+  try{
+    const res=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
+        system:"You are a financial advisor AI. Give 4-5 concise financial insights. Return ONLY a JSON array with objects: icon (emoji), text (1-2 sentences), color (hex: #7c3aed tips, #059669 positive, #d97706 warning, #dc2626 alert). No markdown, no preamble.",
+        messages:[{role:"user",content:`Analyze: ${JSON.stringify(summary)}`}]
+      })
+    });
+    const data=await res.json();
+    const raw=data.content?.map(c=>c.text||"").join("").replace(/```json|```/g,"").trim();
+    state.aiInsights=JSON.parse(raw);
+  } catch {
+    state.aiInsights=genLocalInsights();
+  }
+  btn.textContent="✦ Generate Insights"; btn.disabled=false;
+  renderInsights(); showToast("Insights updated!");
 }
 
-function openTxModal(){
-  document.getElementById("tx-modal")
-    .classList.add("show");
+function genLocalInsights(){
+  const txs=state.transactions, budget=state.activeProfile?.budget||0;
+  const expenses=txs.filter(t=>t.type==="expense");
+  const byCat={};
+  expenses.forEach(t=>{byCat[t.category]=(byCat[t.category]||0)+t.amount;});
+  const top=Object.entries(byCat).sort((a,b)=>b[1]-a[1])[0];
+  const total=expenses.reduce((s,t)=>s+t.amount,0);
+  const income=txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const ins=[];
+  if(top)ins.push({icon:"↑",text:`Highest spending: ${top[0]} at ₹${top[1].toLocaleString()}`,color:"#7c3aed"});
+  if(budget&&total>budget*0.8&&total<=budget)ins.push({icon:"!",text:`You've used ${Math.round((total/budget)*100)}% of your monthly budget`,color:"#d97706"});
+  if(budget&&total>budget)ins.push({icon:"✕",text:`Budget exceeded by ₹${(total-budget).toLocaleString()}`,color:"#dc2626"});
+  if(income>0)ins.push({icon:"₹",text:`Total income this period: ₹${income.toLocaleString()}`,color:"#059669"});
+  return ins;
 }
 
-function closeTxModal(){
-  document.getElementById("tx-modal")
-    .classList.remove("show");
+// TX MODAL
+function openTxModal(id=null){
+  state.editTxId=id;
+  const modal=document.getElementById("tx-modal");
+  const t=id?state.transactions.find(x=>x.id===id):null;
+  document.getElementById("tx-modal-title").textContent=id?"Edit Transaction":"Add Transaction";
+  document.getElementById("tx-amount").value=t?t.amount:"";
+  document.getElementById("tx-date").value=t?t.date:new Date().toISOString().split("T")[0];
+  document.getElementById("tx-notes").value=t?t.notes:"";
+  document.querySelector(".btn-save").textContent=id?"Update":"Add Transaction";
+  setTxType(t?t.type:"expense");
+  buildCatSelect(t?.category||"");
+  modal.classList.add("show");
 }
+function closeTxModal(){document.getElementById("tx-modal").classList.remove("show");}
 
 function setTxType(type){
   state.txType=type;
+  const eBtn=document.getElementById("btn-expense"), iBtn=document.getElementById("btn-income");
+  eBtn.style.background=type==="expense"?"rgba(220,38,38,0.2)":"rgba(255,255,255,0.04)";
+  eBtn.style.color=type==="expense"?"#f87171":"var(--dim)";
+  iBtn.style.background=type==="income"?"rgba(5,150,105,0.2)":"rgba(255,255,255,0.04)";
+  iBtn.style.color=type==="income"?"#34d399":"var(--dim)";
+  buildCatSelect();
 }
 
-function buildCatSelect(){
-
-  const cats =
-    state.activeProfile.type==="business"
-      ? B_CATS
-      : P_CATS;
-
-  document.getElementById("tx-cat").innerHTML =
-    cats.map(c=>`
-      <option value="${c}">
-        ${c}
-      </option>
-    `).join("");
+function buildCatSelect(selected=""){
+  const cats=state.activeProfile?.type==="business"?B_CATS:P_CATS;
+  const sel=document.getElementById("tx-cat");
+  sel.innerHTML='<option value="">Select category</option>'+cats.map(c=>`<option value="${c}"${c===selected?" selected":""}>${c}</option>`).join("");
 }
 
-async function saveTx(){
-
-  const amount=parseFloat(
-    document.getElementById("tx-amount").value
-  );
-
-  const category=
-    document.getElementById("tx-cat").value;
-
-  if(!amount || !category){
-    showToast("Fill all fields","danger");
-    return;
-  }
-
-  const tx = {
-    id: Date.now().toString(),
-    profileId: state.activeProfile.id,
-    amount,
-    type: state.txType,
-    category,
-    date: document.getElementById("tx-date").value,
-    notes: document.getElementById("tx-notes").value
+function saveTx(){
+  const amt=parseFloat(document.getElementById("tx-amount").value);
+  const cat=document.getElementById("tx-cat").value;
+  if(!amt||!cat){showToast("Please fill amount and category","danger");return;}
+  const tx={
+    id:state.editTxId||Date.now().toString(),
+    profileId:state.activeProfile.id,
+    amount:amt, type:state.txType,
+    category:cat,
+    date:document.getElementById("tx-date").value,
+    notes:document.getElementById("tx-notes").value
   };
-
-  state.transactions.unshift(tx);
-
-  await safeSet(
-    `ft_tx_${state.activeProfile.id}`,
-    state.transactions
-  );
-
-  renderDashboard();
-
-  renderTransactions();
-
-  closeTxModal();
-
-  showToast("Transaction Added");
-}
-
-function renderTransactions(){
-
-  const list=document.getElementById("tx-list");
-
-  if(!state.transactions.length){
-
-    list.innerHTML=`
-      <div style="padding:30px;text-align:center;">
-        No transactions
-      </div>
-    `;
-
-    return;
+  if(state.editTxId){
+    state.transactions=state.transactions.map(t=>t.id===state.editTxId?tx:t);
+    showToast("Transaction updated!");
+  } else {
+    state.transactions.unshift(tx);
+    showToast("Transaction added!");
   }
-
-  list.innerHTML=state.transactions.map(t=>`
-
-    <div class="tx-row">
-
-      <div>
-        <div>${t.category}</div>
-        <div style="font-size:12px;color:gray;">
-          ${t.date}
-        </div>
-      </div>
-
-      <div style="
-        color:${t.type==="income"
-          ? "#34d399"
-          : "#f87171"
-        };
-      ">
-        ${t.type==="income" ? "+" : "-"}
-        ₹${t.amount}
-      </div>
-
-    </div>
-
-  `).join("");
+  safeSet(`ft_tx_${state.activeProfile.id}`,state.transactions);
+  closeTxModal(); renderDashboard(); renderTransactions(); state.editTxId=null;
 }
+
+function editTx(id){openTxModal(id);}
+function deleteTx(id){
+  state.transactions=state.transactions.filter(t=>t.id!==id);
+  safeSet(`ft_tx_${state.activeProfile.id}`,state.transactions);
+  renderTransactions(); renderDashboard(); showToast("Deleted","danger");
+}
+
+// PROFILE MODAL
+function buildAvatarOpts(){
+  const el=document.getElementById("avatar-opts");
+  el.innerHTML=AVATARS.map(a=>`<button class="avatar-opt${a===state.selectedAvatar?" selected":""}" onclick="selectAvatar('${a}')">${a}</button>`).join("");
+}
+function selectAvatar(a){
+  state.selectedAvatar=a;
+  document.querySelectorAll(".avatar-opt").forEach(b=>b.classList.toggle("selected",b.textContent===a));
+}
+function setProfileType(type){
+  state.profileType=type;
+  document.getElementById("btn-personal").style.background=type==="personal"?"rgba(124,58,237,0.2)":"rgba(255,255,255,0.04)";
+  document.getElementById("btn-personal").style.color=type==="personal"?"#a78bfa":"var(--dim)";
+  document.getElementById("btn-business").style.background=type==="business"?"rgba(124,58,237,0.2)":"rgba(255,255,255,0.04)";
+  document.getElementById("btn-business").style.color=type==="business"?"#a78bfa":"var(--dim)";
+}
+function openProfileModal(){document.getElementById("profile-modal").classList.add("show");}
+function closeProfileModal(){document.getElementById("profile-modal").classList.remove("show");}
+
+function saveProfile(){
+  const name=document.getElementById("p-name").value.trim();
+  if(!name){showToast("Profile name required","danger");return;}
+  const np={id:Date.now().toString(),userId:state.currentUser.id,name,type:state.profileType,budget:parseFloat(document.getElementById("p-budget").value)||0,avatar:state.selectedAvatar};
+  state.profiles.push(np);
+  safeSet(`ft_profiles_${state.currentUser.id}`,state.profiles);
+  if(!state.activeProfile){setActiveProfile(np.id);}
+  buildProfileSelect(); renderProfiles(); closeProfileModal();
+  document.getElementById("p-name").value=""; document.getElementById("p-budget").value="";
+  showToast("Profile created!");
+}
+
+// Close modals on overlay click
+document.getElementById("tx-modal").addEventListener("click",function(e){if(e.target===this)closeTxModal();});
+document.getElementById("profile-modal").addEventListener("click",function(e){if(e.target===this)closeProfileModal();});
 </script>
 </body>
 </html>
